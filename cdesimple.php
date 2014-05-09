@@ -46,6 +46,8 @@ class CDESimple {
   var $outputdateformat = "dd/mm/YYYY";
   var $updatefieldinfo = true; //this is turned off when doing computed field calculations, internal and expert use only
   var $RAWRESULT;
+  var $lastrowid; //for sqlite autoincrement fields 
+  
   /* Function to make a FPDF report - returns filename */
   function sql_report( $sql = "", $groupby = "", $outputpath = "output/", $companyname = "", $title = "", $extraheader = "somefunction", $orientation = "P", $pagesize = "A4", $totalcolumns = array( ), $compcolumns = array( ), $createcsv = false, $dontshow = "", //fields must be inputted separated by columns 
     $formats = "", $hidecolumns, $csvdelim = ",", $computedcolumns = array( ), $debug = false ) {
@@ -664,7 +666,6 @@ class CDESimple {
         $errormsg   = "<span style=\"$errorstyle\"><b>CDE Simple Notice </b>$classfile [$classline] [$errno] $errstr in $errfile on line $errline <br />\n</span>";
         break;
       default:
-        $canadd     = false; //dont add these errors
         //Not sure what the error is but read the screen - normally undeclared variables
         $errorstyle = "font-family: Courier New; color: purple;";
         $errormsg   = "<span style=\"$errorstyle\"><b>CDE Simple Unknown </b>$classfile [$classline] [$errno] $errstr in $errfile on line $errline <br />\n</span>";
@@ -818,6 +819,10 @@ class CDESimple {
     } else {
       trigger_error( "Please implement " . __METHOD__ . " for " . $this->dbtype, E_USER_ERROR );
     }
+    
+    //get the last error
+    $this->get_error();
+    
     /* Debugging for Connect */
     if ( !$this->dbh ) {
       if ( is_array( $dbpath ) ) {
@@ -919,9 +924,7 @@ class CDESimple {
   function get_instance( $word, $sql ) {
     $icount = 0;
     foreach ( $sql as $id => $value ) {
-      $value = trim( $value );
-      $ipos  = stripos( $value, $word );
-      if ( $ipos !== false ) {
+      if ( trim (str_replace ( ",", "", $value)) == trim ($word) ) {
         $instance[$icount] = $id;
         $icount++;
       }
@@ -962,6 +965,7 @@ class CDESimple {
       $sql       = str_replace( "\r", "", $sql );
       $sql       = str_replace( " ,", ",", $sql );
       $sql       = str_replace( ", ", ",", $sql );
+      $sql       = str_replace( "," ,", ", $sql );
       $parsedsql = explode( " ", $sql );
       //get rid of spaces ?
       foreach ( $parsedsql as $pid => $pvalue ) {
@@ -986,8 +990,9 @@ class CDESimple {
         }
       } else if ( ( $this->dbtype == "mysql" || $this->dbtype == "sqlite3" ) && stripos( $sql, "first " ) !== false ) {
         //select first 1 skip 10 must become 
-        //print_r ($parsedsql);
+               
         $firsts = $this->get_instance( "first", $parsedsql );
+               
         if ( count( $firsts ) > 0 ) {
           $icount = 0;
           //kill all the firsts 
@@ -995,18 +1000,21 @@ class CDESimple {
             $limits[$icount] = $parsedsql[$index + 1];
             unset( $parsedsql[$index + 1] );
             unset( $parsedsql[$index] );
-            if ( strtolower( $parsedsql[$index + 2] ) == "skip" ) {
+            if ( trim(strtolower( $parsedsql[$index + 2]) ) == "skip" ) {
+              
               $limits[$icount] = $parsedsql[$index + 3] . "," . $limits[$icount];
               unset( $parsedsql[$index + 2] );
               unset( $parsedsql[$index + 3] );
             }
             $limits[$icount] = "limit " . $limits[$icount];
-            $limits[$icount] = str_replace( "0,", "", $limits[$icount] );
+            
             $icount++;
           }
           //Add the first limit to the end of the parsedsql;
+         
+          
           array_push( $parsedsql, $limits[0] );
-          //print_r ($parsedsql);
+         
         }
       } else if ( $this->dbtype == "firebird" && stripos( $sql, "limit " ) !== false ) //check for MySQL or ORacle limit
         {
@@ -1061,6 +1069,7 @@ class CDESimple {
         );
         $parsedsql = preg_replace( $sqlwords, $repwords, $parsedsql );
       }
+      
       $newsql = "";
       if ( is_array( $parsedsql ) ) {
         foreach ( $parsedsql as $id => $value ) {
@@ -1069,10 +1078,13 @@ class CDESimple {
           }
         }
         $parsedsql = $newsql;
+       
       }
     } else {
       $parsedsql = $sql;
     }
+    
+    
     $this->lastsql[count( $this->lastsql )] = $parsedsql; // save the last sql  
     return $parsedsql;
   }
@@ -1192,8 +1204,10 @@ class CDESimple {
       foreach ( $sql as $id => $script ) {
         $script = $this->set_params( $script, $inputvalues );
         $result = @cubrid_execute( $this->dbh, $script );
-        if ( $result )
+        if ( $result ) {  
           $result = true;
+          $this->lastrowid = @cubrid_insert_id();
+        }
       }
     } else /*SQLite*/ if ( $this->dbtype == "sqlite" ) {
       foreach ( $sql as $id => $script ) {
@@ -1203,12 +1217,12 @@ class CDESimple {
           $result .= "No Errors\n";
         }
       }
-    } else /*SQLite*/ if ( $this->dbtype == "sqlite3" ) {
+    } else /*SQLite3*/ if ( $this->dbtype == "sqlite3" ) {
       foreach ( $sql as $id => $script ) {
         $script = $this->set_params( $script, $inputvalues );
         $result = $this->dbh->exec( $script );
         if ( $result == 1 ) {
-          $result .= $this->dbh->lastErrorMsg() . "\n";
+          $this->lastrowid = $this->dbh->lastInsertRowID();
         }
       }
     } else /*Firebird*/ if ( $this->dbtype == "firebird" ) {
@@ -1282,6 +1296,10 @@ class CDESimple {
     } else {
       trigger_error( "Please implement " . __METHOD__ . " for " . $this->dbtype, E_USER_ERROR );
     }
+    
+    //get the last error
+    $this->get_error();
+    
     /* Debugging for Exec */
     if ( $result ) {
       return $result;
@@ -1329,6 +1347,10 @@ class CDESimple {
     } else {
       trigger_error( "Please implement " . __METHOD__ . " for " . $this->dbtype, E_USER_ERROR );
     }
+    
+    //see if there was an error
+    $this->get_error();
+    
     /* Debugging for Commit */
     if ( $result ) {
       return $result;
@@ -1374,6 +1396,10 @@ class CDESimple {
     } else {
       trigger_error( "Please implement " . __METHOD__ . " for " . $this->dbtype, E_USER_ERROR );
     }
+    
+    if ($result == "") $result = "No Error";
+    $this->lasterror[count( $this->lasterror )] = $result;
+    
     return $result;
   }
   /* 
@@ -1995,6 +2021,10 @@ class CDESimple {
       $this->fieldinfo[$id] = $field;
     }
     $this->RAWRESULT = $result;
+    
+    //get the last error
+    $this->get_error();
+    
     /* Debugging for get_row */
     if ( $result ) {
       //check the data
@@ -2122,7 +2152,12 @@ class CDESimple {
             }
           }
         }
+        
+        
+        
+        
         $result = $newresult;
+        
       }
     } else {
       trigger_error( "Cant get row for $this->dbpath in " . __METHOD__ . " for " . $this->dbtype, E_USER_NOTICE );
@@ -2173,12 +2208,21 @@ class CDESimple {
   */
   function get_blob( $column ) {
     $content = "";
-    if ( $column && $this->dbtype == "CUBRID" ) {
-      //This is not cool, have asked for a better function to perform this trick, also only compatible for Linux
-      $lob = @cubrid_lob_get( $this->dbh, $column );
-      @cubrid_lob_export( $this->dbh, $lob[0], "/tmp/tmp.txt" );
-      $content = file_get_contents( "/tmp/tmp.txt" );
-      @cubrid_lob_close( $lob );
+    if ($column && $this->dbtype == "CUBRID") {
+      $req = @cubrid_execute( $this->dbh, $column );
+      $row = @cubrid_fetch_row( $req, CUBRID_LOB );
+      $content = "";
+      while (true) {
+        if ($data = cubrid_lob2_read( $row[0], 1024 ) ) {
+          $content .= $data;
+        }
+        elseif ( $data === false ) {
+            break;
+        }
+        else {
+            break;
+        }             
+      }
     } else if ( $column && $this->dbtype == "firebird" ) {
       //Get the blob information
       $blob_data = ibase_blob_info( $this->dbh, $column );
@@ -2293,10 +2337,20 @@ class CDESimple {
     if ($prefix != "") {
       $newobject = null;
       foreach ($result as $key => $value) {
-        $newkey = $prefix.$key;
-        $newobject->$newkey = $value;
+          $newkey = $prefix.$key;
+          //check for serialized data
+          if (unserialize($value) !== false) {
+            $value = unserialize ($value);
+          }
+          $newobject->$newkey = $value;
       }
-      $result = $newobject;    
+      
+      if ($rowtype == 1 || $rowtype == 2 ) {
+        $result = (array) $newobject;
+      }
+       else {
+        $result = $newobject;
+      }    
     }
         
     return $result;
@@ -2321,16 +2375,15 @@ class CDESimple {
     $newresult = array();
     foreach ($result as $rid => $record ) {
       $aresult = $record; //return the first value
-      
-      
-      if ($prefix != "") {
         $newobject = null;
         foreach ($aresult as $key => $value) {
           $newkey = $prefix.$key;
+          if (unserialize($value) !== false) {
+            $value = unserialize ($value);
+          }
           $newobject->$newkey = $value;
         }
         $newresult[] = $newobject;    
-      }
     }
     
     //fix up the field info
@@ -2364,11 +2417,11 @@ class CDESimple {
       trigger_error( "No database handle, use connect first in " . __METHOD__ . " for " . $this->dbtype, E_USER_WARNING );
     } else if ( $this->dbtype == "odbc" ) {
     } else if ( $this->dbtype == "CUBRID" ) {
-      $sqltables = "select t.class_name as name
-                      from _db_class t 
-                     where class_type = 0 
-                       and is_system_class = 0
-                  order by t.class_name ";
+      $sqltables = "SELECT class_name as name 
+                    FROM db_class 
+                    WHERE is_system_class = 'NO'
+                    AND class_name <> '_cub_schema_comments'
+                    ";
       $tables    = $this->get_row( $sqltables );
       foreach ( $tables as $id => $record ) {
         $sqlinfo   = "select * from $record->NAME limit 1";
@@ -2693,7 +2746,9 @@ class CDESimple {
     $genkey = true, //Generate a new number using inbuilt get_next_id 
     $requestvar = "", //Request variable to populate with new id for post processing
     $passwordfields = "", //Fields that may be crypted automatically
-    $datefields = "", $exec = false ) //Fields that may be seen as date fields and converted accordingly 
+    $datefields = "", //Fields that may be seen as date fields and converted accordingly
+    $exec = false,
+    $arrayindex = 0 )  
     {
     //Get the length of field prefix
     $prefixlen = strlen( $fieldprefix );
@@ -2723,6 +2778,9 @@ class CDESimple {
       if ( substr( $name, 0, $prefixlen ) == $fieldprefix ) {
         //if ($value == "on") $value = 1;
         //$value = stripcslashes ($value);
+        if (is_array ($value)) {
+          $value = $value[$arrayindex];
+        }
         $value      = str_replace( "'", "''", $value );
         $tempfields = explode( ",", $passwordfields );
         foreach ( $tempfields as $id => $fieldname ) //Look for password fields
@@ -2786,13 +2844,22 @@ class CDESimple {
     $index = "", //Index 
     $requestvar = "", //Request variable to populate with new id for post processing
     $passwordfields = "", //Fields that may be crypted automatically
-    $datefields = "", $exec = false ) //Fields that may be seen as date fields and converted accordingly 
+    $datefields = "",//Fields that may be seen as date fields and converted accordingly 
+    $exec = false, //Execute the command immediately
+    $arrayindex=0 //If a request field is an array - which index to use 
+    )  
     {
     //Get the length of field prefix
     $prefixlen = strlen( $fieldprefix );
     $sqlupdate = "update $tablename set 0=0 ";
     foreach ( $_REQUEST as $name => $value ) {
+      //we need to see if we are dealing with a multiple update
       if ( substr( $name, 0, $prefixlen ) == $fieldprefix ) {
+        //print_r ($value);
+        if (is_array ($value)) {
+          $value = $value[$arrayindex];
+        }
+        
         if ( $value == "on" )
           $value = 1;
         $tempfields = explode( ",", $passwordfields );
