@@ -41,7 +41,7 @@ class CDESimple {
   var $affectedrows = 0; //affected rows or rows returned by a query
   var $nooffields = 0; //the no of columns or fields returned
   var $fieldinfo; //layout in an array of each field with its type and information
-  var $version = "2.0"; //current version of CDE
+  var $version = "2.2"; //current version of CDE
   var $dbdateformat = "YYYY-mm-dd h:i:s"; //future functionality for date time conversion to the database for a database
   var $outputdateformat = "dd/mm/YYYY";
   var $updatefieldinfo = true; //this is turned off when doing computed field calculations, internal and expert use only
@@ -950,7 +950,7 @@ class CDESimple {
       $sql = str_replace( "timestamp", "datetime", $sql );
     }
     if ( $this->dbtype == "sqlite3" ) {
-      $sql = str_replace( "'now'", "DateTime('now')", $sql );
+      $sql = str_replace( "'now'", "datetime('now')", $sql );
     }
     if ( $this->dbtype == "mysql" ) {
       $sql = str_replace( "'now'", "CURRENT_TIMESTAMP", $sql );
@@ -1132,12 +1132,16 @@ class CDESimple {
           $inputvalues[$i] = mysql_real_escape_string( $inputvalues[$i] );
         }
       }
-      if ( $this->dbtype == "sqlite" )
+      if ( $this->dbtype == "sqlite" ) {
         $inputvalues[$i] = sqlite_escape_string( $inputvalues[$i] );
-      if ( $this->dbtype == "sqlite3" )
-        $inputvalues[$i] = $this->dbh->escapeString( $inputvalues[$i] );
-      if ( $this->dbtype == "CUBRID" )
+      }
+        else   
+      if ( $this->dbtype == "sqlite3" ) {
         $inputvalues[$i] = $this->escape_string( $inputvalues[$i] );
+      } else   
+      if ( $this->dbtype == "CUBRID" ) {
+        $inputvalues[$i] = $this->escape_string( $inputvalues[$i] );
+      }  
       $inputvalues[$i] = "'" . $inputvalues[$i] . "'";
       $lastpos         = 1;
       while ( $lastpos <> 0 ) {
@@ -1212,6 +1216,8 @@ class CDESimple {
     } else /*SQLite*/ if ( $this->dbtype == "sqlite" ) {
       foreach ( $sql as $id => $script ) {
         $script = $this->set_params( $script, $inputvalues );
+        
+        
         @sqlite_exec( $this->dbh, $script, $result );
         if ( $result == "" ) {
           $result .= "No Errors\n";
@@ -1219,8 +1225,51 @@ class CDESimple {
       }
     } else /*SQLite3*/ if ( $this->dbtype == "sqlite3" ) {
       foreach ( $sql as $id => $script ) {
-        $script = $this->set_params( $script, $inputvalues );
-        $result = $this->dbh->exec( $script );
+        //$script = $this->set_params( $script, $inputvalues );
+        if (strpos($script, "?") !== false) {
+          //echo "here";
+            $statement = $this->dbh->prepare($script);
+	
+	  //print_r ($this->dbh);
+          if ($statement) {  
+              
+	    $params    = array( );        
+            for ( $i = 1; $i < func_num_args(); $i++ ) {
+              $params[$i] = func_get_arg( $i );
+            }
+
+           	
+            foreach ($params as $pid => $param) {
+	      if ( !preg_match ('^(\P{Cc}|[\t\n])*$', $param) ) { // preg_match $param)) {
+                if (is_float($param)) {
+                 //echo "binding {$pid} float"; 
+		 $statement->bindValue ($pid, $param, SQLITE3_FLOAT);
+                }
+                else
+                if (is_int($param)) {
+                  //echo "binding {$pid} int"; 
+                  $statement->bindValue ($pid, $param, SQLITE3_INTEGER);
+                }
+                else 
+                if (is_string($param)) {
+                 //echo "binding text"; 
+                 $statement->bindValue ($pid, $param, SQLITE3_TEXT);
+                }
+              }
+               else {
+		//echo "binding blob  ";
+                $statement->bindValue ($pid, $param, SQLITE3_BLOB);  
+              }
+            }
+            $result = $statement->execute();
+          }
+            else {
+            echo $result = "Failed to run script {$script}";
+          }
+        }
+          else {
+          $result = $this->dbh->exec ($script);  
+        }
         if ( $result == 1 ) {
           $this->lastrowid = $this->dbh->lastInsertRowID();
         }
