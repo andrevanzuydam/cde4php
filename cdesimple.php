@@ -2889,7 +2889,14 @@ class CDESimple {
         }
       }
     }
-    $sqlupdate .= " where $primarykey = '" . $index . "'";
+    $sqlupdate .= " where ";
+    $tempprimary = explode(",", $primarykey);
+    $tempIndex = explode(",", $index);
+    foreach ($tempprimary as $key => $value)
+    {
+        $sqlupdatetemp[] = "$value = ".$tempIndex[$key]."";
+    }
+    $sqlupdate .= implode ( " AND " , $sqlupdatetemp );
     $sqlupdate                              = str_replace( "0=0 ,", "", $sqlupdate );
     $sqlupdate                              = str_replace( "'null'", "null", $sqlupdate );
     $this->lastsql[count( $this->lastsql )] = $sqlupdate;
